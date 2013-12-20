@@ -288,7 +288,7 @@ sub base :Chained('list_customer') :PathPart('') :CaptureArgs(1) {
     $c->stash->{pbxgroup_dt_columns} = NGCP::Panel::Utils::Datatables::set_columns($c, [
         { name => "id", search => 1, title => "#" },
         { name => "name", search => 1, title => "Name" },
-        { name => "extension", search => 1, title => "Extension" },
+        { name => "extension", search => 0, title => "Extension", literal_sql => "''" },
     ]);
 
     my $subs = NGCP::Panel::Utils::Subscriber::get_custom_subscriber_struct(
@@ -677,7 +677,24 @@ sub pbx_group_ajax :Chained('base') :PathPart('pbx/group/ajax') :Args(0) {
     my $res = $c->model('DB')->resultset('voip_pbx_groups')->search({
         contract_id => $c->stash->{contract}->id,
     });
-    NGCP::Panel::Utils::Datatables::process($c, $res, $c->stash->{pbxgroup_dt_columns});
+    NGCP::Panel::Utils::Datatables::process($c, $res, $c->stash->{pbxgroup_dt_columns},
+            sub {
+                my ($self) = @_;
+                my %result;
+                my $primary_number = $self->provisioning_voip_subscriber->voip_subscriber->primary_number;
+                $result{number} = $primary_number->cc.($primary_number->ac//"").$primary_number->sn if $primary_number;
+                my $base_cli = $self->provisioning_voip_subscriber->voip_usr_preferences->search_rs({
+                        'attribute.attribute' => 'cloud_pbx_base_cli'
+                    },{
+                        join => 'attribute',
+                    })->first;
+                $result{base_cli} = $base_cli->value if $base_cli;
+                if ($primary_number && $base_cli &&
+                        $result{number} =~ /^$result{base_cli}/) {
+                    $result{extension} = $result{number} =~ s/^$result{base_cli}(.*)$/$1/r;
+                }
+                return %result;
+            });
     $c->detach( $c->view("JSON") );
 }
 
